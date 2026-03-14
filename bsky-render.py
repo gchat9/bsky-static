@@ -43,31 +43,136 @@ def post_url(handle, uri):
     return f"https://bsky.app/profile/{handle}/post/{rkey}"
 
 
+def render_images(images):
+    if not images:
+        return ""
+    entries = []
+    for img in images:
+        url = img.get("fullsize") or img.get("thumb")
+        if not url:
+            continue
+        alt = html.escape(img.get("alt") or "")
+        href = html.escape(url)
+        entries.append(
+            f'<a href="{href}" target="_blank" rel="noreferrer"><img src="{href}" alt="{alt}"></a>'
+        )
+    if not entries:
+        return ""
+    parts = [f'<div class="media images" data-count="{len(entries)}">']
+    parts.extend(entries)
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def render_external(external):
+    if not isinstance(external, dict):
+        return ""
+    uri = external.get("uri")
+    thumb = external.get("thumb")
+    title = html.escape(external.get("title") or "")
+    desc = html.escape(external.get("description") or "")
+    if uri:
+        thumb_html = (
+            f'<img src="{html.escape(thumb)}" alt="">' if thumb else ""
+        )
+        return (
+            '<div class="media external">'
+            f'<a href="{html.escape(uri)}" target="_blank" rel="noreferrer">'
+            f"{thumb_html}<div class=\"external-text\"><div class=\"external-title\">{title}</div>"
+            f'<div class="external-desc">{desc}</div></div></a></div>'
+        )
+    return ""
+
+
+def render_record_view(record):
+    if not isinstance(record, dict):
+        return ""
+    author = record.get("author") or {}
+    handle = author.get("handle") or ""
+    display = author.get("displayName") or ""
+    uri = record.get("uri") or ""
+    link = ""
+    if uri and handle:
+        link = post_url(handle, uri)
+    value = record.get("value") or {}
+    text = html.escape(value.get("text") or "")
+    embed_html = ""
+    embeds = record.get("embeds")
+    if isinstance(embeds, list) and embeds:
+        parts = []
+        for e in embeds:
+            rendered = render_embed_view(e, link)
+            if rendered:
+                parts.append(rendered)
+        embed_html = "\n".join(parts)
+    else:
+        embed_html = render_embed_view(record.get("embed"), link)
+        if not embed_html:
+            embed_html = render_embed(value.get("embed"), link)
+    author_label = html.escape(display or handle)
+    handle_label = html.escape(handle)
+    return "\n".join(
+        [
+            '<div class="record-embed">',
+            '<div class="record-meta">'
+            f'<span class="record-author">{author_label}</span>'
+            f'<span class="record-handle">@{handle_label}</span></div>',
+            f'<div class="record-text">{text}</div>' if text else "",
+            embed_html,
+            "</div>",
+        ]
+    )
+
+
+def render_embed_view(embed, post_link):
+    if not isinstance(embed, dict):
+        return ""
+    embed_type = embed.get("$type", "")
+    if embed_type.startswith("app.bsky.embed.images#"):
+        return render_images(embed.get("images") or [])
+    if embed_type.startswith("app.bsky.embed.video#"):
+        playlist = embed.get("playlist")
+        thumb = embed.get("thumbnail")
+        alt = html.escape(embed.get("alt") or "")
+        if not playlist and thumb:
+            return f'<div class="media video"><img src="{html.escape(thumb)}" alt="{alt}"></div>'
+        if playlist:
+            poster = f'<img src="{html.escape(thumb)}" alt="{alt}">' if thumb else ""
+            href = post_link or playlist
+            return (
+                '<div class="media video">'
+                f'<a class="video-link" href="{html.escape(href)}" target="_blank" rel="noreferrer">'
+                f"{poster}</a></div>"
+            )
+        return ""
+    if embed_type.startswith("app.bsky.embed.external#"):
+        return render_external(embed.get("external") or {})
+    if embed_type.startswith("app.bsky.embed.record#"):
+        record = embed.get("record")
+        if isinstance(record, dict):
+            return render_record_view(record)
+    if embed_type.startswith("app.bsky.embed.recordWithMedia#"):
+        record = embed.get("record")
+        media = embed.get("media")
+        parts = []
+        if isinstance(record, dict):
+            parts.append(render_record_view(record))
+        if isinstance(media, dict):
+            parts.append(render_embed_view(media, post_link))
+        return "\n".join([p for p in parts if p])
+    return ""
+
+
 def render_embed(embed, post_link):
     if not isinstance(embed, dict):
         return ""
     embed_type = embed.get("$type", "")
 
+    if embed_type.endswith("#view"):
+        return render_embed_view(embed, post_link)
+
     if embed_type.startswith("app.bsky.embed.images#"):
-        items = embed.get("images") or []
-        if not items:
-            return ""
-        entries = []
-        for img in items:
-            url = img.get("fullsize") or img.get("thumb")
-            if not url:
-                continue
-            alt = html.escape(img.get("alt") or "")
-            href = html.escape(url)
-            entries.append(
-                f'<a href="{href}" target="_blank" rel="noreferrer"><img src="{href}" alt="{alt}"></a>'
-            )
-        if not entries:
-            return ""
-        parts = [f'<div class="media images" data-count="{len(entries)}">']
-        parts.extend(entries)
-        parts.append("</div>")
-        return "\n".join(parts)
+        return render_images(embed.get("images") or [])
 
     if embed_type.startswith("app.bsky.embed.video#"):
         playlist = embed.get("playlist")
@@ -86,24 +191,56 @@ def render_embed(embed, post_link):
         return ""
 
     if embed_type.startswith("app.bsky.embed.external#"):
-        ext = embed.get("external") or {}
-        uri = ext.get("uri")
-        thumb = ext.get("thumb")
-        title = html.escape(ext.get("title") or "")
-        desc = html.escape(ext.get("description") or "")
-        if uri:
-            thumb_html = (
-                f'<img src="{html.escape(thumb)}" alt="">' if thumb else ""
-            )
-            return (
-                '<div class="media external">'
-                f'<a href="{html.escape(uri)}" target="_blank" rel="noreferrer">'
-                f"{thumb_html}<div class=\"external-text\"><div class=\"external-title\">{title}</div>"
-                f'<div class="external-desc">{desc}</div></div></a></div>'
-            )
+        return render_external(embed.get("external") or {})
+
+    if embed_type.startswith("app.bsky.embed.record#"):
+        record = embed.get("record")
+        if isinstance(record, dict):
+            return render_record_view(record)
         return ""
 
     return ""
+
+
+def post_identity(item):
+    post = (item or {}).get("post") or {}
+    uri = post.get("uri") or ""
+    record = post.get("record") or {}
+    created_at = record.get("createdAt")
+    reply = record.get("reply") or {}
+    parent = reply.get("parent") or {}
+    parent_uri = parent.get("uri") or ""
+    return uri, parent_uri, created_at
+
+
+def render_post_item(item, handle, hidden, last_rendered_ts):
+    post = (item or {}).get("post") or {}
+    record = post.get("record") or {}
+    text_raw = record.get("text") or ""
+    text = html.escape(text_raw)
+    created = html.escape(record.get("createdAt") or "")
+    created_ts = parse_time(record.get("createdAt"))
+    uri = post.get("uri") or ""
+    link = post_url(handle, uri) if uri else ""
+    embed = render_embed(post.get("embed"), link)
+    is_hidden = hidden
+    if last_rendered_ts is not None and created_ts is not None and created_ts < last_rendered_ts:
+        is_hidden = True
+    return (
+        "\n".join(
+            [
+                '<article class="post{}">'.format(" older" if is_hidden else ""),
+                f'<div class="meta"><a href="{html.escape(link)}" target="_blank" rel="noreferrer">{html.escape(handle)}</a>',
+                f"<span class=\"date\">{created}</span></div>",
+                f'<div class="text">{text}</div>',
+                embed,
+                "</article>",
+            ]
+        ),
+        is_hidden,
+        text_raw,
+        created_ts,
+    )
 
 
 def render_html(handle, feed, ignore_patterns=None, did=None):
@@ -113,41 +250,85 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
     ignore_patterns = ignore_patterns or []
     hidden_count = 0
     last_rendered_ts = None
-    newest_ts = None
+    newest_ts = [None]
     last_meta = load_last_rendered_meta(handle)
     if last_meta:
         last_rendered_ts = parse_time(last_meta.get("last_rendered_post"))
+    item_map = {}
+    order = []
     for item in items:
-        post = (item or {}).get("post") or {}
-        record = post.get("record") or {}
-        text_raw = record.get("text") or ""
-        if ignore_patterns and any(p.search(text_raw) for p in ignore_patterns):
+        uri, parent_uri, created_at = post_identity(item)
+        if not uri:
             continue
-        text = html.escape(text_raw)
-        created = html.escape(record.get("createdAt") or "")
-        created_ts = parse_time(record.get("createdAt"))
-        if created_ts is not None:
-            if newest_ts is None or created_ts > newest_ts:
-                newest_ts = created_ts
-        uri = post.get("uri") or ""
-        link = post_url(handle, uri) if uri else ""
-        embed = render_embed(post.get("embed"), link)
-        is_hidden = last_rendered_ts is not None and created_ts is not None and created_ts < last_rendered_ts
-        target = hidden_rows if is_hidden else rows
-        if is_hidden:
-            hidden_count += 1
-        target.append(
-            "\n".join(
-                [
-                    '<article class="post{}">'.format(" older" if is_hidden else ""),
-                    f'<div class="meta"><a href="{html.escape(link)}" target="_blank" rel="noreferrer">{html.escape(handle)}</a>',
-                    f"<span class=\"date\">{created}</span></div>",
-                    f'<div class="text">{text}</div>',
-                    embed,
-                    "</article>",
-                ]
+        item_map[uri] = item
+        order.append(uri)
+
+    children = {uri: [] for uri in item_map}
+    for uri in order:
+        _, parent_uri, _ = post_identity(item_map[uri])
+        if parent_uri and parent_uri in item_map:
+            children[parent_uri].append(uri)
+
+    def sort_children(uris):
+        def key(u):
+            _, _, created_at = post_identity(item_map[u])
+            ts = parse_time(created_at)
+            return ts or 0
+        return sorted(uris, key=key)
+
+    visited = set()
+
+    def render_thread(root_uri):
+        thread_posts = []
+
+        def dfs(current_uri):
+            if current_uri in visited:
+                return
+            visited.add(current_uri)
+            thread_posts.append(item_map[current_uri])
+            for child_uri in sort_children(children.get(current_uri, [])):
+                dfs(child_uri)
+
+        dfs(root_uri)
+        if not thread_posts:
+            return
+        visible_block = []
+        hidden_block = []
+        for item in thread_posts:
+            html_block, is_hidden, text_raw, created_ts = render_post_item(
+                item, handle, False, last_rendered_ts
             )
-        )
+            if ignore_patterns and any(p.search(text_raw) for p in ignore_patterns):
+                continue
+            if created_ts is not None:
+                if newest_ts[0] is None or created_ts > newest_ts[0]:
+                    newest_ts[0] = created_ts
+            target = hidden_block if is_hidden else visible_block
+            if is_hidden:
+                nonlocal_hidden[0] += 1
+            target.append(html_block)
+        if visible_block:
+            rows.append(
+                '<div class="thread">' + "\n".join(visible_block) + "</div>"
+            )
+        if hidden_block:
+            hidden_rows.append(
+                '<div class="thread">' + "\n".join(hidden_block) + "</div>"
+            )
+
+    nonlocal_hidden = [0]
+    for uri in order:
+        if uri in visited:
+            continue
+        _, parent_uri, _ = post_identity(item_map[uri])
+        if parent_uri and parent_uri in item_map and parent_uri not in visited:
+            continue
+        render_thread(uri)
+    for uri in order:
+        if uri in visited:
+            continue
+        render_thread(uri)
+    hidden_count = nonlocal_hidden[0]
 
     toggle_html = ""
     template_html = ""
@@ -318,6 +499,35 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
       color: var(--muted);
       font-size: 13px;
     }}
+    .record-embed {{
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      background: #faf8f5;
+    }}
+    .record-meta {{
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }}
+    .record-author {{
+      font-weight: 600;
+      color: var(--ink);
+    }}
+    .record-text {{
+      font-size: 28px;
+      line-height: 1.35;
+      margin-bottom: 8px;
+      white-space: pre-wrap;
+    }}
+    .thread {{
+      border-left: 3px solid var(--border);
+      padding-left: 12px;
+      margin: 14px 0;
+    }}
     .read-more-wrap {{
       text-align: center;
       margin: 18px 0 8px;
@@ -352,7 +562,7 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
 </body>
 </html>
 """
-    save_last_rendered_meta(handle, newest_ts, did=did)
+    save_last_rendered_meta(handle, newest_ts[0], did=did)
     return html_doc
 
 
