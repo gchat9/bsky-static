@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import html
 import json
+import os
 import sys
+import time
 import urllib.parse
 import urllib.request
 
@@ -276,6 +278,36 @@ def render_html(handle, feed):
 """
 
 
+def cache_paths(handle):
+    tmpdir = os.environ.get("TMPDIR") or "/tmp"
+    cache_dir = os.path.join(tmpdir, "bsky")
+    cache_path = os.path.join(cache_dir, f"{handle}.json")
+    return cache_dir, cache_path
+
+
+def load_cached_feed(cache_path, max_age_seconds=900):
+    try:
+        mtime = os.path.getmtime(cache_path)
+    except OSError:
+        return None
+    if (time.time() - mtime) > max_age_seconds:
+        return None
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def save_cached_feed(cache_dir, cache_path, feed):
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(feed, f)
+    except OSError:
+        pass
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: bsky-render.py <handle> > feed.html", file=sys.stderr)
@@ -286,12 +318,15 @@ def main():
         print("Handle is required.", file=sys.stderr)
         sys.exit(2)
 
-    did = resolve_handle(handle)
-    if not did:
-        print(f"Could not resolve handle: {handle}", file=sys.stderr)
-        sys.exit(1)
-
-    feed = author_feed(did, limit=50)
+    cache_dir, cache_path = cache_paths(handle)
+    feed = load_cached_feed(cache_path)
+    if feed is None:
+        did = resolve_handle(handle)
+        if not did:
+            print(f"Could not resolve handle: {handle}", file=sys.stderr)
+            sys.exit(1)
+        feed = author_feed(did, limit=50)
+        save_cached_feed(cache_dir, cache_path, feed)
     html_doc = render_html(handle, feed)
     sys.stdout.write(html_doc)
 
