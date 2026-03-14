@@ -2,10 +2,12 @@
 import html
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
 
 API_BASE = "https://public.api.bsky.app/xrpc"
@@ -104,21 +106,38 @@ def render_embed(embed, post_link):
     return ""
 
 
-def render_html(handle, feed):
+def render_html(handle, feed, ignore_patterns=None, did=None):
     items = feed.get("feed") or []
     rows = []
+    ignore_patterns = ignore_patterns or []
+    hidden_count = 0
+    last_rendered_ts = None
+    newest_ts = None
+    last_meta = load_last_rendered_meta(handle)
+    if last_meta:
+        last_rendered_ts = parse_time(last_meta.get("last_rendered_post"))
     for item in items:
         post = (item or {}).get("post") or {}
         record = post.get("record") or {}
-        text = html.escape(record.get("text") or "")
+        text_raw = record.get("text") or ""
+        if ignore_patterns and any(p.search(text_raw) for p in ignore_patterns):
+            continue
+        text = html.escape(text_raw)
         created = html.escape(record.get("createdAt") or "")
+        created_ts = parse_time(record.get("createdAt"))
+        if created_ts is not None:
+            if newest_ts is None or created_ts > newest_ts:
+                newest_ts = created_ts
         uri = post.get("uri") or ""
         link = post_url(handle, uri) if uri else ""
         embed = render_embed(post.get("embed"), link)
+        is_hidden = last_rendered_ts is not None and created_ts is not None and created_ts < last_rendered_ts
+        if is_hidden:
+            hidden_count += 1
         rows.append(
             "\n".join(
                 [
-                    '<article class="post">',
+                    '<article class="post{}">'.format(" older" if is_hidden else ""),
                     f'<div class="meta"><a href="{html.escape(link)}" target="_blank" rel="noreferrer">{html.escape(handle)}</a>',
                     f"<span class=\"date\">{created}</span></div>",
                     f'<div class="text">{text}</div>',
@@ -128,7 +147,14 @@ def render_html(handle, feed):
             )
         )
 
-    return f"""<!doctype html>
+    toggle_html = ""
+    if hidden_count:
+        toggle_html = (
+            '<div class="read-more-wrap">'
+            f'<a id="read-more" href="#">read more... ({hidden_count} hidden)</a>'
+            "</div>"
+        )
+    html_doc = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -288,6 +314,18 @@ def render_html(handle, feed):
       color: var(--muted);
       font-size: 13px;
     }}
+    .post.older {{
+      display: none;
+    }}
+    .read-more-wrap {{
+      text-align: center;
+      margin: 18px 0 8px;
+    }}
+    #read-more {{
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }}
   </style>
 </head>
 <body>
@@ -297,15 +335,29 @@ def render_html(handle, feed):
   </header>
   <main>
     {"".join(rows)}
+    {toggle_html}
   </main>
+  <script>
+    const link = document.getElementById("read-more");
+    if (link) {{
+      link.addEventListener("click", (e) => {{
+        e.preventDefault();
+        document.querySelectorAll(".post.older").forEach((el) => {{
+          el.style.display = "block";
+        }});
+        link.remove();
+      }});
+    }}
+  </script>
 </body>
 </html>
 """
+    save_last_rendered_meta(handle, newest_ts, did=did)
+    return html_doc
 
 
 def cache_paths(handle):
-    tmpdir = os.environ.get("TMPDIR") or "/tmp"
-    cache_dir = os.path.join(tmpdir, "bsky")
+    cache_dir = "/var/cache/bsky"
     cache_path = os.path.join(cache_dir, f"{handle}.json")
     return cache_dir, cache_path
 
@@ -333,6 +385,77 @@ def save_cached_feed(cache_dir, cache_path, feed):
         pass
 
 
+def load_ignore_patterns(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f.readlines()]
+    except OSError:
+        return []
+    patterns = []
+    for line in lines:
+        if not line or line.startswith("#"):
+            continue
+        try:
+            patterns.append(re.compile(line))
+        except re.error:
+            continue
+    return patterns
+
+
+def parse_time(value):
+    if not value:
+        return None
+    try:
+        if value.endswith("Z"):
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except ValueError:
+        return None
+
+
+def last_rendered_paths(handle):
+    data_dir = "/var/lib/bsky"
+    data_path = os.path.join(data_dir, f"{handle}.json")
+    return data_dir, data_path
+
+
+def load_last_rendered_meta(handle):
+    _, data_path = last_rendered_paths(handle)
+    try:
+        with open(data_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def save_last_rendered_meta(handle, newest_ts, did=None):
+    if newest_ts is None:
+        return
+    data_dir, data_path = last_rendered_paths(handle)
+    payload = {
+        "did": did,
+        "last_rendered_post": datetime.fromtimestamp(newest_ts, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        if os.path.exists(data_path) and not did:
+            try:
+                with open(data_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                if isinstance(existing, dict) and existing.get("did"):
+                    payload["did"] = existing.get("did")
+            except (OSError, json.JSONDecodeError):
+                pass
+        with open(data_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except OSError:
+        pass
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: bsky-render.py <handle> > feed.html", file=sys.stderr)
@@ -344,15 +467,19 @@ def main():
         sys.exit(2)
 
     cache_dir, cache_path = cache_paths(handle)
+    ignore_regexes = load_ignore_patterns("/etc/bsky/ignore")
+    last_meta = load_last_rendered_meta(handle)
+    did = last_meta.get("did") if isinstance(last_meta, dict) else None
     feed = load_cached_feed(cache_path)
     if feed is None:
-        did = resolve_handle(handle)
+        if not did:
+            did = resolve_handle(handle)
         if not did:
             print(f"Could not resolve handle: {handle}", file=sys.stderr)
             sys.exit(1)
         feed = author_feed(did, limit=50)
         save_cached_feed(cache_dir, cache_path, feed)
-    html_doc = render_html(handle, feed)
+    html_doc = render_html(handle, feed, ignore_regexes, did=did)
     sys.stdout.write(html_doc)
 
 
