@@ -41,7 +41,7 @@ def post_url(handle, uri):
     return f"https://bsky.app/profile/{handle}/post/{rkey}"
 
 
-def render_embed(embed):
+def render_embed(embed, post_link):
     if not isinstance(embed, dict):
         return ""
     embed_type = embed.get("$type", "")
@@ -75,9 +75,10 @@ def render_embed(embed):
             return f'<div class="media video"><img src="{html.escape(thumb)}" alt="{alt}"></div>'
         if playlist:
             poster = f'<img src="{html.escape(thumb)}" alt="{alt}">' if thumb else ""
+            href = post_link or playlist
             return (
                 '<div class="media video">'
-                f'<a class="video-link" href="{html.escape(playlist)}" target="_blank" rel="noreferrer">'
+                f'<a class="video-link" href="{html.escape(href)}" target="_blank" rel="noreferrer">'
                 f"{poster}</a></div>"
             )
         return ""
@@ -113,7 +114,7 @@ def render_html(handle, feed):
         created = html.escape(record.get("createdAt") or "")
         uri = post.get("uri") or ""
         link = post_url(handle, uri) if uri else ""
-        embed = render_embed(post.get("embed"))
+        embed = render_embed(post.get("embed"), link)
         rows.append(
             "\n".join(
                 [
@@ -190,7 +191,7 @@ def render_html(handle, feed):
       font-weight: 600;
     }}
     .text {{
-      font-size: 16px;
+      font-size: 19px;
       line-height: 1.5;
       white-space: pre-wrap;
       margin-bottom: 10px;
@@ -232,6 +233,9 @@ def render_html(handle, feed):
       max-height: min(120vh, 1000px);
       object-fit: contain;
     }}
+    .video {{
+      text-align: center;
+    }}
     .video a {{
       position: relative;
       display: inline-block;
@@ -251,6 +255,9 @@ def render_html(handle, feed):
       border: 1px solid var(--border);
     }}
     .video img {{
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
       width: 100%;
       height: auto;
       border-radius: 10px;
