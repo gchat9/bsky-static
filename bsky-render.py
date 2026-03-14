@@ -68,7 +68,7 @@ def render_embed(embed):
             poster = f'<img src="{html.escape(thumb)}" alt="{alt}">' if thumb else ""
             return (
                 '<div class="media video">'
-                f'<a href="{html.escape(playlist)}" target="_blank" rel="noreferrer">'
+                f'<a class="video-link" href="{html.escape(playlist)}" target="_blank" rel="noreferrer">'
                 f"{poster}</a></div>"
             )
         return ""
@@ -191,8 +191,18 @@ def render_html(handle, feed):
     }}
     .images {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
+    }}
+    @media (max-width: 900px) {{
+      .images {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }}
+    }}
+    @media (max-width: 640px) {{
+      .images {{
+        grid-template-columns: 1fr;
+      }}
     }}
     .images img {{
       width: 100%;
@@ -201,6 +211,24 @@ def render_html(handle, feed):
       border: 1px solid var(--border);
       max-height: min(120vh, 1000px);
       object-fit: contain;
+    }}
+    .video a {{
+      position: relative;
+      display: inline-block;
+      color: inherit;
+      text-decoration: none;
+    }}
+    .video a::before {{
+      content: "📹";
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      font-size: 18px;
+      line-height: 1;
+      padding: 2px 5px 3px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid var(--border);
     }}
     .video img {{
       width: 100%;
