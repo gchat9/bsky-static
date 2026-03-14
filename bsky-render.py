@@ -50,13 +50,20 @@ def render_embed(embed):
         items = embed.get("images") or []
         if not items:
             return ""
-        parts = ['<div class="media images">']
+        entries = []
         for img in items:
             url = img.get("fullsize") or img.get("thumb")
             if not url:
                 continue
             alt = html.escape(img.get("alt") or "")
-            parts.append(f'<img src="{html.escape(url)}" alt="{alt}">')
+            href = html.escape(url)
+            entries.append(
+                f'<a href="{href}" target="_blank" rel="noreferrer"><img src="{href}" alt="{alt}"></a>'
+            )
+        if not entries:
+            return ""
+        parts = [f'<div class="media images" data-count="{len(entries)}">']
+        parts.extend(entries)
         parts.append("</div>")
         return "\n".join(parts)
 
@@ -195,6 +202,17 @@ def render_html(handle, feed):
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
+    }}
+    .images[data-count="1"] {{
+      grid-template-columns: 1fr;
+    }}
+    .images[data-count="2"] {{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }}
+    .images a {{
+      display: block;
+      color: inherit;
+      text-decoration: none;
     }}
     @media (max-width: 900px) {{
       .images {{
