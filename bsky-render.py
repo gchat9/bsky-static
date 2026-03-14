@@ -109,6 +109,7 @@ def render_embed(embed, post_link):
 def render_html(handle, feed, ignore_patterns=None, did=None):
     items = feed.get("feed") or []
     rows = []
+    hidden_rows = []
     ignore_patterns = ignore_patterns or []
     hidden_count = 0
     last_rendered_ts = None
@@ -132,9 +133,10 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
         link = post_url(handle, uri) if uri else ""
         embed = render_embed(post.get("embed"), link)
         is_hidden = last_rendered_ts is not None and created_ts is not None and created_ts < last_rendered_ts
+        target = hidden_rows if is_hidden else rows
         if is_hidden:
             hidden_count += 1
-        rows.append(
+        target.append(
             "\n".join(
                 [
                     '<article class="post{}">'.format(" older" if is_hidden else ""),
@@ -148,12 +150,14 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
         )
 
     toggle_html = ""
+    template_html = ""
     if hidden_count:
         toggle_html = (
             '<div class="read-more-wrap">'
             f'<a id="read-more" href="#">read more... ({hidden_count} hidden)</a>'
             "</div>"
         )
+        template_html = f'<template id="cut">{"".join(hidden_rows)}</template>'
     html_doc = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -314,9 +318,6 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
       color: var(--muted);
       font-size: 13px;
     }}
-    .post.older {{
-      display: none;
-    }}
     .read-more-wrap {{
       text-align: center;
       margin: 18px 0 8px;
@@ -337,15 +338,18 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
     {"".join(rows)}
     {toggle_html}
   </main>
+  {template_html}
   <script>
     const link = document.getElementById("read-more");
     if (link) {{
       link.addEventListener("click", (e) => {{
         e.preventDefault();
-        document.querySelectorAll(".post.older").forEach((el) => {{
-          el.style.display = "block";
-        }});
-        link.remove();
+        const template = document.getElementById("cut");
+        if (template) {{
+          document.body.append(template.content.cloneNode(true));
+          template.remove();
+        }}
+        link.closest(".read-more-wrap")?.remove();
       }});
     }}
   </script>
