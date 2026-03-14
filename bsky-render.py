@@ -221,8 +221,8 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
       font-weight: 600;
     }}
     .text {{
-      font-size: 19px;
-      line-height: 1.5;
+      font-size: 30px;
+      line-height: 1.25;
       white-space: pre-wrap;
       margin-bottom: 10px;
     }}
@@ -330,10 +330,6 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
   </style>
 </head>
 <body>
-  <header>
-    <h1>Bluesky feed</h1>
-    <div class="sub">{html.escape(handle)} - top 50 posts</div>
-  </header>
   <main>
     {"".join(rows)}
     {toggle_html}
