@@ -352,12 +352,14 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
                 nonlocal_hidden[0] += 1
             target.append(html_block)
         if visible_block:
+            cls = "thread single" if len(visible_block) == 1 else "thread"
             rows.append(
-                '<div class="thread">' + "\n".join(visible_block) + "</div>"
+                f'<div class="{cls}">' + "\n".join(visible_block) + "</div>"
             )
         if hidden_block:
+            cls = "thread single" if len(hidden_block) == 1 else "thread"
             hidden_rows.append(
-                '<div class="thread">' + "\n".join(hidden_block) + "</div>"
+                f'<div class="{cls}">' + "\n".join(hidden_block) + "</div>"
             )
 
     nonlocal_hidden = [0]
@@ -573,14 +575,12 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
       white-space: pre-wrap;
     }}
     .thread {{
-      border-left: 4px solid #c8c2b8;
-      background: #fdfbf8;
-      padding: 10px 12px;
-      margin: 16px 0;
-      border-radius: 8px;
+      border-left: 3px solid #aaa;
+      padding: 0 0 0 6px;
+      margin: 12px 0 0 0;
     }}
-    .thread .post {{
-      margin: 8px 0;
+    .thread.single {{
+      border-left-color: transparent;
     }}
     .read-more-wrap {{
       text-align: center;
