@@ -43,6 +43,17 @@ def post_url(handle, uri):
     return f"https://bsky.app/profile/{handle}/post/{rkey}"
 
 
+def post_url_from_uri(uri):
+    if not uri:
+        return ""
+    parts = uri.split("/")
+    if len(parts) < 5:
+        return ""
+    did = parts[2]
+    rkey = parts[-1]
+    return f"https://bsky.app/profile/{did}/post/{rkey}"
+
+
 def render_images(images):
     if not images:
         return ""
@@ -94,6 +105,8 @@ def render_record_view(record):
     link = ""
     if uri and handle:
         link = post_url(handle, uri)
+    if not link and uri:
+        link = post_url_from_uri(uri)
     value = record.get("value") or {}
     text = html.escape(value.get("text") or "")
     embed_html = ""
@@ -111,6 +124,14 @@ def render_record_view(record):
             embed_html = render_embed(value.get("embed"), link)
     author_label = html.escape(display or handle)
     handle_label = html.escape(handle)
+    if not (author_label or handle_label or text or embed_html):
+        if link:
+            return (
+                '<div class="record-embed">'
+                f'<a href="{html.escape(link)}" target="_blank" rel="noreferrer">Embedded post</a>'
+                "</div>"
+            )
+        return ""
     return "\n".join(
         [
             '<div class="record-embed">',
@@ -199,6 +220,16 @@ def render_embed(embed, post_link):
             return render_record_view(record)
         return ""
 
+    if embed_type.startswith("app.bsky.embed.recordWithMedia#"):
+        record = embed.get("record")
+        media = embed.get("media")
+        parts = []
+        if isinstance(record, dict):
+            parts.append(render_record_view(record))
+        if isinstance(media, dict):
+            parts.append(render_embed(media, post_link))
+        return "\n".join([p for p in parts if p])
+
     return ""
 
 
@@ -213,7 +244,7 @@ def post_identity(item):
     return uri, parent_uri, created_at
 
 
-def render_post_item(item, handle, hidden, last_rendered_ts):
+def render_post_item(item, feed_handle, hidden, last_rendered_ts):
     post = (item or {}).get("post") or {}
     record = post.get("record") or {}
     text_raw = record.get("text") or ""
@@ -221,17 +252,30 @@ def render_post_item(item, handle, hidden, last_rendered_ts):
     created = html.escape(record.get("createdAt") or "")
     created_ts = parse_time(record.get("createdAt"))
     uri = post.get("uri") or ""
-    link = post_url(handle, uri) if uri else ""
+    author = post.get("author") or {}
+    author_handle = author.get("handle") or ""
+    author_display = author.get("displayName") or author_handle
+    link = post_url(author_handle, uri) if uri and author_handle else (post_url_from_uri(uri) if uri else "")
     embed = render_embed(post.get("embed"), link)
+    reason = (item or {}).get("reason") or {}
+    repost_by = ""
+    if reason.get("$type") == "app.bsky.feed.defs#reasonRepost":
+        by = reason.get("by") or {}
+        repost_handle = by.get("handle") or ""
+        if repost_handle:
+            repost_by = f"Reposted by {html.escape(repost_handle)}"
     is_hidden = hidden
     if last_rendered_ts is not None and created_ts is not None and created_ts < last_rendered_ts:
         is_hidden = True
+    author_label = html.escape(author_display or feed_handle)
+    author_handle_label = html.escape(author_handle or feed_handle)
     return (
         "\n".join(
             [
                 '<article class="post{}">'.format(" older" if is_hidden else ""),
-                f'<div class="meta"><a href="{html.escape(link)}" target="_blank" rel="noreferrer">{html.escape(handle)}</a>',
+                f'<div class="meta"><a href="{html.escape(link)}" target="_blank" rel="noreferrer">{author_label}</a>',
                 f"<span class=\"date\">{created}</span></div>",
+                f'<div class="repost">{repost_by}</div>' if repost_by else "",
                 f'<div class="text">{text}</div>',
                 embed,
                 "</article>",
@@ -396,6 +440,11 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
       color: var(--muted);
       margin-bottom: 8px;
     }}
+    .repost {{
+      font-size: 12px;
+      color: var(--muted);
+      margin: -4px 0 6px;
+    }}
     .meta a {{
       color: var(--accent);
       text-decoration: none;
@@ -524,9 +573,14 @@ def render_html(handle, feed, ignore_patterns=None, did=None):
       white-space: pre-wrap;
     }}
     .thread {{
-      border-left: 3px solid var(--border);
-      padding-left: 12px;
-      margin: 14px 0;
+      border-left: 4px solid #c8c2b8;
+      background: #fdfbf8;
+      padding: 10px 12px;
+      margin: 16px 0;
+      border-radius: 8px;
+    }}
+    .thread .post {{
+      margin: 8px 0;
     }}
     .read-more-wrap {{
       text-align: center;
